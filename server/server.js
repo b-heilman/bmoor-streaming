@@ -162,6 +162,68 @@ router.get('/file', async (req, res) => {
 	res.end();
 });
 
+function getLogger(){
+	return transformStream(function(chunk){
+		console.log(JSON.stringify(chunk, null, '\t'));
+		
+		return chunk;
+	});
+}
+
+class StreamMemory {
+	constructor(factory, settings={}){
+		this.factory = factory;
+		this.settings = settings;
+	}
+
+	getValue(ctx){
+		if (this.memory){
+			return stream.Readable.from(this.memory);
+		} else {
+			this.memory = [];
+
+			const memorizer = transformStream((chunk) => {
+				this.memory.push(chunk);
+
+				return chunk;
+			});
+
+			return this.factory(ctx)
+				.pipe(getLogger())
+				.pipe(memorizer);
+		}
+	}
+}
+
+const cache = new StreamMemory(
+	() => {
+		const {parser} = require('stream-json');
+		const {streamArray} = require('stream-json/streamers/StreamArray');
+		
+		return fs.createReadStream('sample.json', 'utf8')
+			.pipe(parser())
+			.pipe(streamArray())
+			.pipe(transformStream((datum) => {
+				// console.log('parsing: a');
+
+				return datum.value;
+			}));
+	}
+);
+
+router.get('/cache', async (req, res) => {
+	res.statusCode = 200;
+	res.setHeader('Content-type', 'text/json');
+	res.setHeader('Access-Control-Allow-Origin', '*');
+
+	await complexStringify({
+		hasCache: !!cache.memory,
+		results: cache.getValue()
+	}, res);
+
+	res.end();
+});
+
 router.get('/trigger', async (req, res) => {
 	res.statusCode = 200;
 	res.setHeader('Content-type', 'text/json');
